@@ -23,10 +23,15 @@ define("tinymce/spellcheckerplugin/Plugin", [
 	"tinymce/ui/Menu",
 	"tinymce/dom/DOMUtils",
 	"tinymce/util/JSONRequest",
-	"tinymce/util/URI"
-], function(DomTextMatcher, PluginManager, Tools, Menu, DOMUtils, JSONRequest, URI) {
+	"tinymce/util/URI",
+        "tinymce/EditorManager",
+	"Ext"
+], function(DomTextMatcher, PluginManager, Tools, Menu, DOMUtils, JSONRequest, URI, EditorManager, Ext) {
 	PluginManager.add('spellchecker', function(editor, url) {
 		var lastSuggestions, started, suggestionsMenu, settings = editor.settings;
+		
+		//timer object for execute the spellcheck on some special keys
+		var mceSpellCheckRuntimeTimer, livecheckEnabled = true;
 
 		function isEmpty(obj) {
 			/*jshint unused:false*/
@@ -91,7 +96,10 @@ define("tinymce/spellcheckerplugin/Plugin", [
 			suggestionsMenu.moveTo(pos.x, pos.y + target.offsetHeight);
 		}
 
-		function spellcheck() {
+		/**
+		 * @ignoreEmpty dont show a message if no errors are found
+		 */
+		function spellcheck(ignoreEmpty) {
 			var textFilter, words = [], uniqueWords = {};
 
 			if (started) {
@@ -102,10 +110,17 @@ define("tinymce/spellcheckerplugin/Plugin", [
 			started = true;
 
 			function doneCallback(suggestions) {
-				editor.setProgressState(false);
+				//editor.setProgressState(false); we use the old toggle as one-time spellcheck
 
-				if (isEmpty(suggestions)) {
-					editor.windowManager.alert('No misspellings found');
+				if (isEmpty(suggestions) && ignoreEmpty !== true) {
+					if (Ext === null || Ext === undefined) {
+						editor.windowManager.alert('No misspellings found');
+					} else {
+						var message = EditorManager.translate('No misspellings found');
+						var title = EditorManager.translate('Spellcheck');
+						Ext.MessageBox.alert(title, message);
+					}				
+
 					started = false;
 					return;
 				}
@@ -168,14 +183,14 @@ define("tinymce/spellcheckerplugin/Plugin", [
 						}
 
 						editor.windowManager.alert(error);
-						editor.setProgressState(false);
+						//editor.setProgressState(false); we use the old toggle as one-time spellcheck
 						textFilter = null;
 						started = false;
 					}
 				});
 			}
 
-			editor.setProgressState(true);
+			//editor.setProgressState(true); we use the old toggle as one-time spellcheck
 
 			var spellCheckCallback = settings.spellchecker_callback || defaultSpellcheckCallback;
 			spellCheckCallback("spellcheck", words, doneCallback);
@@ -269,35 +284,84 @@ define("tinymce/spellcheckerplugin/Plugin", [
 		});
 
 		editor.addMenuItem('spellchecker', {
-			text: 'Spellcheck',
+			text: 'One-time spell check',
 			context: 'tools',
 			onclick: spellcheck,
-			selectable: true,
-			onPostRender: function() {
-				var self = this;
-
-				editor.on('SpellcheckStart SpellcheckEnd', function() {
-					self.active(started);
-				});
-			}
+			selectable: true //,
+			//onPostRender: function() {
+			//	var self = this;
+			//
+			//	editor.on('SpellcheckStart SpellcheckEnd', function() {
+			//		self.active(started);
+			//	});
+			//}
 		});
 
 		editor.addButton('spellchecker', {
-			tooltip: 'Spellcheck',
-			onclick: spellcheck,
-			onPostRender: function() {
-				var self = this;
+			tooltip: 'One-time spell check', //spellchecker button is no toggle button anymore
+			onclick: spellcheck //,
+			//onPostRender: function() {
+			//	var self = this;
+			//
+			//	editor.on('SpellcheckStart SpellcheckEnd', function() {
+			//		self.active(started);
+			//	});
+			//}
+		});
 
-				editor.on('SpellcheckStart SpellcheckEnd', function() {
-					self.active(started);
-				});
-			}
+		editor.addButton('spellchecker-livecheck', {
+			tooltip: 'Activate/Deactivate spell check',
+			icon : false,
+			classes: 'widget btn spellchecker_on',
+			onclick: function() {
+			    livecheckEnabled = !livecheckEnabled;
+			    this.active(livecheckEnabled);
+			    
+			    if (livecheckEnabled) {
+				this.toggleClass('spellchecker_on', true);
+				this.toggleClass('spellchecker_off', false);
+			    } else {
+				this.toggleClass('spellchecker_on', false);
+				this.toggleClass('spellchecker_off', true);
+			    }
+			},
+		        active : true
 		});
 
 		editor.on('remove', function() {
 			if (suggestionsMenu) {
 				suggestionsMenu.remove();
 				suggestionsMenu = null;
+			}
+		});
+
+		editor.addCommand('mceSpellCheckRuntime', function() {
+			mceSpellCheckRuntimeTimer = window.setTimeout(function() {
+				spellcheck(true);
+			}, 500);
+		});
+        
+		editor.on('keyup', function(e) {
+			if (livecheckEnabled === false) {
+			    return;
+			}
+		  
+			if (mceSpellCheckRuntimeTimer) {
+				window.clearTimeout(mceSpellCheckRuntimeTimer);
+			}
+			
+			// 46 = delete
+			// 8  = backspace
+			// 9  = tab
+			// 13 = enter
+			// 32 = space
+			// 186 - 191 = ;,=
+			// 17 = ctrl
+			var code = e.keyCode;
+			if(code == 17 || code == 46 || code == 8 || code == 9 || code == 13 || 
+				code == 32 || (code >= 186 && code <= 191) || (code >= 219 && code <= 222)) {
+
+				editor.execCommand('mceSpellCheckRuntime');
 			}
 		});
 	});
