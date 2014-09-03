@@ -104,7 +104,7 @@ define("tinymce/spellcheckerplugin/Plugin", [
 
 			if (started) {
 				finish();
-				return;
+				//return; dont return. just re-start the spellcheck.
 			}
 
 			started = true;
